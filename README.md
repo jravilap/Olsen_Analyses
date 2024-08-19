@@ -3,7 +3,7 @@ Analysis for genetic screening and metabolomics identify glial adenosine metabol
 
 This project contains the analysis of metabolite abundance measurements obtained with four different liquid chromatography mass spectrometry methods of synuclein expressing or control or fly brains in a wilde type or Adk1 knwockout background. 
 
-##Table of contents
+## Table of contents
 ### Prerequisites
 - R (version 4.3.1 or higher)
 - RStudio (optional, but recommended)
