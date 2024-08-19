@@ -1,0 +1,4 @@
+# config.yml
+base_directory: "path/to/your/base_directory"
+data_directory: "data/raw_data"
+results_directory: "results"
