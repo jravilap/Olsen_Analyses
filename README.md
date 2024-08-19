@@ -29,9 +29,3 @@ install.packages(c("readxl", "calibrate", "dplyr", "ggplot2"))
 - `results/`: Output files, including plots and tables.
 - `common_functions/`: Custom R functions used in the analysis.
 - `config.yml`: Configuration file for setting paths.
-
-### config.yml
-base_directory: "path/to/your/base_directory"
-data_directory: "data/raw_data"
-results_directory: "results"
-
