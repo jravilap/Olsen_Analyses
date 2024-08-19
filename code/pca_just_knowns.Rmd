@@ -5,11 +5,13 @@ date: "2024-01-16"
 output: html_document
 ---
 
+
 # Load Required Libraries
 ```{r}
-library(readxl)    # For reading Excel files
-library(calibrate) # For plotting with calibration
-library(yaml)
+library(readxl)   
+library(calibrate) 
+library(dplyr)    
+library(ggplot2)  
 
 # Load the configuration
 config <- yaml::read_yaml("config.yml")
@@ -126,84 +128,60 @@ a_backup <- a
 ```
 
 
-#Perform T-tests and Calculate Fold Changes (FC)
+#Impute Missing Values and Remove Zero-Variance Metabolites
+```{r}
+#Drop metabolites with no measurements
+toDrop <- which(apply(a,1,FUN = function(x){return(sum(is.na(x)))}) == ncol(a))
+#Empty metabolites
+if(length(toDrop) > 0){
+  m[toDrop,]
+  a <- a[-toDrop,]
+  m <- m[-toDrop,]
+  
+}
+
+a <- rm.zeros(a)
+a <- fun.impute(a)
+a_backup <- a
+
+# Remove zero-variance metabolites (often internal standards if IS-scaled data)
+toKeep <- apply(a, 1, sd, na.rm = TRUE) != 0
+a <- a[toKeep, ]
+```
+
+
+#Perform PCA (Principal Component Analysis)
 
 ```{r}
-# Define groups and contrasts for statistical analysis
-groups <- list(
-  "Control" = s_m == "Control",
-  "Control + AKI-KD" = s_m == "Control + AKI-KD",
-  "Synuclein" = s_m == "Synuclein",
-  "Synuclein + AKI-KD" = s_m == "Synuclein + AKI-KD"
-)
+# Conduct PCA on the log-transformed data
+pcaResults <- prcomp(t(log(a)), scale. = TRUE, center = TRUE)
 
-# Define functions to calculate t-tests and fold changes
-t_test_by_row <- function(df, block1, block2){
-  pvals <- sapply(1:nrow(df), function(i) try(t.test(df[i,block1], df[i,block2], var.equal = TRUE)$p.value, silent = TRUE))
-  as.numeric(unlist(pvals))
-}
+# Create a dataframe with PCA results and additional metadata
+PC <- as.data.frame(pcaResults$x) %>%
+      mutate(names = rownames(pcaResults$x), s_m = s_m) %>%
+      mutate(median = apply(a, 2, median, na.rm = TRUE),
+             mean = apply(a, 2, mean, na.rm = TRUE),
+             sum = apply(a, 2, sum, na.rm = TRUE))
 
-FC_by_row <- function(df, block1, block2){
-  apply(df, 1, function(x) try(mean(x[block2])/mean(x[block1]), silent = TRUE))
-}
-
-# Perform t-tests and calculate fold changes for each contrast
-m$ttest_control_v_control_aki <- t_test_by_row(a, groups$Control, groups$`Control + AKI-KD`)
-m$fc_control_v_control_aki <- FC_by_row(a, groups$Control, groups$`Control + AKI-KD`)
-
-m$ttest_syn_v_syn_aki <- t_test_by_row(a, groups$Synuclein, groups$`Synuclein + AKI-KD`)
-m$fc_syn_v_syn_aki <- FC_by_row(a, groups$Synuclein, groups$`Synuclein + AKI-KD`)
-
-m$ttest_control_v_syn <- t_test_by_row(a, groups$Control, groups$Synuclein)
-m$fc_control_v_syn <- FC_by_row(a, groups$Control, groups$Synuclein)
-
-m$ttest_control_aki_v_syn_aki <- t_test_by_row(a, groups$`Control + AKI-KD`, groups$`Synuclein + AKI-KD`)
-m$fc_control_aki_v_syn_aki <- FC_by_row(a, groups$`Control + AKI-KD`, groups$`Synuclein + AKI-KD`)
+# Plot PCA results
+ggplot(PC, aes(x = PC1, y = PC2, color = s_m)) + 
+  geom_point() + 
+  theme(legend.title = element_blank()) + 
+  ggtitle("PCA Scores Plot for Known Metabolites (HP, HN, CP, CN)") + 
+  scale_x_continuous(name = paste0("[PCA1] ", var.fun(pcaResults)[1], " %")) +
+  scale_y_continuous(name = paste0("[PCA2] ", var.fun(pcaResults)[2], " %"))
 
 ```
 
-#Generate Volcano Plots
-```{r}
-# Function to create volcano plots
-plot_volcano <- function(df, fc_column, pval_column, title, condition1, condition2, xlimits){
-  
-  x_coord <- log2(df[, fc_column])
-  y_coord <- -log2(df[, pval_column])
-  
-  plot(x_coord, y_coord, pch = 16, cex = 0.5, col = "#61615133",
-       xlab = paste0("log2 fold change [", condition2, " / ", condition1, "]"), 
-       ylab = "-log2 p-value", 
-       main = title, xlim = xlimits)
-  
-  significant <- abs(x_coord) > 0.5 & y_coord > 4.3
-  points(x_coord[significant], y_coord[significant], pch = 20, cex = 0.5, col = "#66b9ff")
-  
-  labeled <- significant & !is.na(df$Metabolite)
-  points(x_coord[labeled], y_coord[labeled], pch = 20, cex = 0.5, col = "#ff667c")
-  textxy(x_coord[labeled], y_coord[labeled], labs = df[labeled, "Metabolite"], cex = 0.7, offset = 1)
-}
 
-
-```
 
 #Write 
 ```{r}
-pdf(paste0(results_directory,"/output_volcano_plots_knowns_HP-HN-CP-CN.pdf"),8,8)
-plot_volcano(m, fc_column = "fc_control_v_control_aki", pval_column = "ttest_control_v_control_aki", 
-             title = "Control vs. AKI-KD", condition1 = "Control", condition2 = "Control AKI-KD", xlimits = c(-8,8))
-mtext("HILIC-pos and HILIC-neg data")
-
-plot_volcano(m, fc_column = "fc_syn_v_syn_aki", pval_column = "ttest_syn_v_syn_aki", 
-             title = "Synuclein vs. Synuclein AKI-KD", condition1 = "Synuclein", condition2 = "Synuclein AKI-KD", xlimits = c(-7,7))
-mtext("HILIC-pos and HILIC-neg data")
-
-plot_volcano(m, fc_column = "fc_control_v_syn", pval_column = "ttest_control_v_syn", 
-             title = "Control vs. Synuclein", condition1 = "Control", condition2 = "Synuclein", xlimits = c(-6,6))
-mtext("HILIC-pos and HILIC-neg data")
-
-plot_volcano(m, fc_column = "fc_control_aki_v_syn_aki", pval_column = "ttest_control_aki_v_syn_aki", 
-             title = "Control AKI-KD vs Synuclein AKI-KD", condition1 = "Control AKI-KD", condition2 = "Synuclein AKI-KD", xlimits = c(-10,10))
-mtext("HILIC-pos and HILIC-neg data")
+pdf(paste0(results_directory,"/pca_knowns_HP-HN-CP-CN.pdf"),8,8)
+ggplot(PC, aes(x = PC1, y = PC2, color=s_m)) + 
+  geom_point() + theme(legend.title = element_blank()) + ggtitle("PCA Scores plot knowns HP and HN, CP, CN") + 
+  scale_x_continuous(name=paste0("[PCA1] ", var.fun(pcaResults)[1], " %")) +
+  scale_y_continuous(name=paste0("[PCA2] ", var.fun(pcaResults)[2], " %"))
 dev.off()
 ```
 
