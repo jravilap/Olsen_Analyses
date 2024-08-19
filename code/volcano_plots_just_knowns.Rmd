@@ -1,0 +1,204 @@
+---
+title: "Olsen_Analyses"
+author: "JA"
+date: "2024-01-16"
+output: html_document
+---
+
+# Load Required Libraries
+```{r}
+library(readxl)    # For reading Excel files
+library(calibrate) # For plotting with calibration
+source("Z:/Avila/R/commonFunctions/fun1.R")  # Custom functions from a specific directory
+```
+
+
+#Import Results from Excel Files
+```{r}
+# Define directories
+directory <- "Z:/Collaborations/Olsen/21_1207_OLS_FlyPilot/Combined_Results/"
+write_directory <- "Z:/Collaborations/Olsen/21_1207_OLS_FlyPilot/JA_Analyses/"
+
+# Load data from different sheets
+HP <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                               sheet = "HILIC-pos", skip = 4), stringsAsFactors = FALSE)
+HN <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                               sheet = "HILIC-neg", skip = 4), stringsAsFactors = FALSE)
+CP <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                               sheet = "C8-pos", skip = 4), stringsAsFactors = FALSE)
+CN <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                               sheet = "C18-neg", skip = 4), stringsAsFactors = FALSE)
+```
+
+#Import metadata
+```{r}
+# Load metadata from the same Excel file
+HP_metadata <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                                        sheet = "HILIC-pos", range = "J1:V5"), stringsAsFactors = FALSE)
+HN_metadata <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                                        sheet = "HILIC-neg", range = "J1:V5"), stringsAsFactors = FALSE)
+CP_metadata <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                                        sheet = "C8-pos", range = "J1:V5"), stringsAsFactors = FALSE)
+CN_metadata <- as.data.frame(read_excel(paste0(directory,"toOlsen/22_0322_alphaSyn_fly_pilot_Classes.xlsx"),
+                                        sheet = "C18-neg", range = "J1:V5"), stringsAsFactors = FALSE)
+
+# Extract study metadata from HN sheet
+s_m <- as.character(HN_metadata[2, -1])
+```
+
+
+#Combine and Clean Data
+```{r}
+# Combine all datasets into one dataframe
+df <- rbind(HP, HN, CP, CN)
+
+# Remove irrelevant columns by their names
+df <- df[, !colnames(df) %in% c("...23", "0.05")]
+
+# Rename specific columns for clarity
+colnames(df)[colnames(df) == "p value...25"] <- "p value_Syn_vs_Ctrl"
+colnames(df)[colnames(df) == "p value...28"] <- "p value_AKI_KD_Syn_vs_AKI_KD_Ctrl"
+```
+
+
+#Identify and Handle Duplicated Metabolites
+Metabolites annotated in more than one 
+```{r}
+#Duplicated metabolites
+dup_metabs <- df$Metabolite[!is.na(df$Metabolite)][duplicated(df$Metabolite[!is.na(df$Metabolite)])]
+write.csv(x = df[df$Metabolite%in%dup_metabs,], paste0(write_directory,"dup_metabs.csv"))
+
+df$Metabolite[df$Metabolite%in%dup_metabs]
+
+# Read decision file for duplicates and remove unwanted duplicates
+toRemove <- read.csv(paste0(write_directory,"dup_metabs_decision.csv"))
+table(toRemove$Decision)
+dim(df)
+for(r in 1:nrow(toRemove)){
+  if(toRemove$Decision[r] == ""){
+    loc_toRm <- which(toRemove$Method[r] == df$Method & toRemove$Compound_ID[r] == df$Compound_ID)
+    print(df[loc_toRm,c("Method","Metabolite")])
+    df <- df[!(toRemove$Method[r] == df$Method & toRemove$Compound_ID[r] == df$Compound_ID),]
+  }
+}
+dim(df)
+
+#Check any duplicates left:
+df$Metabolite[!is.na(df$Metabolite)][duplicated(df$Metabolite[!is.na(df$Metabolite)])]
+```
+
+#Remove Unwanted Data
+```{r}
+# Remove internal standards and incorrectly identified metabolites
+df <- df[!grepl("nternal", df$HMDB_ID), ]
+df <- df[!grepl("xypurinol", df$Metabolite), ]
+
+# Remove rows with unknown metabolites
+df <- df[!is.na(df$Metabolite), ]
+
+```
+
+#Split Data into Metadata and Values
+```{r}
+# Separate the metadata and measurement data
+m <- df[, c(1:10, 23:26)]
+a <- as.matrix(df[, c(11:22)])
+```
+
+#Impute values
+```{r}
+# Drop metabolites with no measurements
+toDrop <- which(rowSums(is.na(a)) == ncol(a))
+if(length(toDrop) > 0){
+  m <- m[-toDrop, ]
+  a <- a[-toDrop, ]
+}
+
+# Apply custom imputation methods
+a <- rm.zeros(a)
+a <- fun.impute(a)
+a_backup <- a
+```
+
+
+#Perform T-tests and Calculate Fold Changes (FC)
+
+```{r}
+# Define groups and contrasts for statistical analysis
+groups <- list(
+  "Control" = s_m == "Control",
+  "Control + AKI-KD" = s_m == "Control + AKI-KD",
+  "Synuclein" = s_m == "Synuclein",
+  "Synuclein + AKI-KD" = s_m == "Synuclein + AKI-KD"
+)
+
+# Define functions to calculate t-tests and fold changes
+t_test_by_row <- function(df, block1, block2){
+  pvals <- sapply(1:nrow(df), function(i) try(t.test(df[i,block1], df[i,block2], var.equal = TRUE)$p.value, silent = TRUE))
+  as.numeric(unlist(pvals))
+}
+
+FC_by_row <- function(df, block1, block2){
+  apply(df, 1, function(x) try(mean(x[block2])/mean(x[block1]), silent = TRUE))
+}
+
+# Perform t-tests and calculate fold changes for each contrast
+m$ttest_control_v_control_aki <- t_test_by_row(a, groups$Control, groups$`Control + AKI-KD`)
+m$fc_control_v_control_aki <- FC_by_row(a, groups$Control, groups$`Control + AKI-KD`)
+
+m$ttest_syn_v_syn_aki <- t_test_by_row(a, groups$Synuclein, groups$`Synuclein + AKI-KD`)
+m$fc_syn_v_syn_aki <- FC_by_row(a, groups$Synuclein, groups$`Synuclein + AKI-KD`)
+
+m$ttest_control_v_syn <- t_test_by_row(a, groups$Control, groups$Synuclein)
+m$fc_control_v_syn <- FC_by_row(a, groups$Control, groups$Synuclein)
+
+m$ttest_control_aki_v_syn_aki <- t_test_by_row(a, groups$`Control + AKI-KD`, groups$`Synuclein + AKI-KD`)
+m$fc_control_aki_v_syn_aki <- FC_by_row(a, groups$`Control + AKI-KD`, groups$`Synuclein + AKI-KD`)
+
+```
+
+#Generate Volcano Plots
+```{r}
+# Function to create volcano plots
+plot_volcano <- function(df, fc_column, pval_column, title, condition1, condition2, xlimits){
+  
+  x_coord <- log2(df[, fc_column])
+  y_coord <- -log2(df[, pval_column])
+  
+  plot(x_coord, y_coord, pch = 16, cex = 0.5, col = "#61615133",
+       xlab = paste0("log2 fold change [", condition2, " / ", condition1, "]"), 
+       ylab = "-log2 p-value", 
+       main = title, xlim = xlimits)
+  
+  significant <- abs(x_coord) > 0.5 & y_coord > 4.3
+  points(x_coord[significant], y_coord[significant], pch = 20, cex = 0.5, col = "#66b9ff")
+  
+  labeled <- significant & !is.na(df$Metabolite)
+  points(x_coord[labeled], y_coord[labeled], pch = 20, cex = 0.5, col = "#ff667c")
+  textxy(x_coord[labeled], y_coord[labeled], labs = df[labeled, "Metabolite"], cex = 0.7, offset = 1)
+}
+
+
+```
+
+#Write 
+```{r}
+pdf(paste0(write_directory,"output_volcano_plots_knowns_HP-HN-CP-CN.pdf"),8,8)
+plot_volcano(m, fc_column = "fc_control_v_control_aki", pval_column = "ttest_control_v_control_aki", 
+             title = "Control vs. AKI-KD", condition1 = "Control", condition2 = "Control AKI-KD", xlimits = c(-8,8))
+mtext("HILIC-pos and HILIC-neg data")
+
+plot_volcano(m, fc_column = "fc_syn_v_syn_aki", pval_column = "ttest_syn_v_syn_aki", 
+             title = "Synuclein vs. Synuclein AKI-KD", condition1 = "Synuclein", condition2 = "Synuclein AKI-KD", xlimits = c(-7,7))
+mtext("HILIC-pos and HILIC-neg data")
+
+plot_volcano(m, fc_column = "fc_control_v_syn", pval_column = "ttest_control_v_syn", 
+             title = "Control vs. Synuclein", condition1 = "Control", condition2 = "Synuclein", xlimits = c(-6,6))
+mtext("HILIC-pos and HILIC-neg data")
+
+plot_volcano(m, fc_column = "fc_control_aki_v_syn_aki", pval_column = "ttest_control_aki_v_syn_aki", 
+             title = "Control AKI-KD vs Synuclein AKI-KD", condition1 = "Control AKI-KD", condition2 = "Synuclein AKI-KD", xlimits = c(-10,10))
+mtext("HILIC-pos and HILIC-neg data")
+dev.off()
+```
+
