@@ -30,6 +30,3 @@ readxl_1.4.3
 - `common_functions/`: Custom R functions used in the analysis.
 - `config.yml`: Configuration file for setting paths.
 
-## License
-
-This project is licensed under the MIT License - see the `LICENSE` file for details.
