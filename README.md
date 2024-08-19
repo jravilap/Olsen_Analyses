@@ -1,7 +1,7 @@
 # Olsen_Analyses
 Analysis for genetic screening and metabolomics identify glial adenosine metabolism as a therapeutic target in Parkinson’s disease
 
-This project contains the analysis of metabolite abundance measurements obtained with four different liquid chromatography mass spectrometry methods of synuclein expressing or control or fly brains in a wilde type or Adk1 knwockout background. 
+This project contains the analysis of metabolite abundance measurements obtained with four different liquid chromatography mass spectrometry methods of synuclein expressing or control or fly brains in a wilde type or Adk1 knockout background. 
 
 ## Table of contents
 ### Prerequisites
