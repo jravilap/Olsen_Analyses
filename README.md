@@ -15,11 +15,11 @@ The following R packages are required. You can install them using the commands b
 install.packages(c("readxl", "calibrate", "dplyr", "ggplot2"))
 ```
 ### Package versions
-ggplot2_3.5.1
-dplyr_1.1.4
-yaml_2.3.8
-calibrate_1.7.7
-readxl_1.4.3   
+- ggplot2_3.5.1
+- dplyr_1.1.4
+- yaml_2.3.8
+- calibrate_1.7.7
+- readxl_1.4.3   
 
 ## Project Structure
 - `code/`: Contains the R scripts for the analysis.
